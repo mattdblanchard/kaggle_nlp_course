@@ -161,7 +161,6 @@ indexes <- createDataPartition(d$label, times = 1,
 train <- d[indexes,]
 test <- d[-indexes,]
 
-
 # Verify proportions are equivalent in the train and test datasets
 prop.table(table(train$label))
 prop.table(table(test$label))
@@ -263,7 +262,7 @@ colnames(train.tokens.matrix)[1:50]
 
 # Setup a feature data frame with labels.
 train.tokens.df <- bind_cols(label = train$label, convert(train.tokens.dfm, to = "data.frame"))
-
+View(train.tokens.df)
 # Often, tokenization requires some additional pre-processing
 # col names are the words in texts. Some of the column names will
 # create problems later so we need to clean them up. Here are examples
@@ -272,7 +271,7 @@ names(train.tokens.df)[c(139, 141, 211, 213)]
 
 # Cleanup column names. Will modify only names that are not syntactically valid
 names(train.tokens.df) <- make.names(names(train.tokens.df))
-
+head(train.tokens.df)
 # Use caret to create stratified folds for 10-fold cross validation repeated 
 # 3 times (i.e., create 30 random stratified samples)
 # we are using stratified cross validation because we have a class imbalance 
@@ -457,6 +456,7 @@ names(train.tokens.tfidf.df) <- make.names(names(train.tokens.tfidf.df))
 
 # Check out our results.
 rpart.cv.2
+
 
 # N-grams allow us to augment our document-term frequency matrices with
 # word ordering. This often leads to increased performance (e.g., accuracy)
@@ -1064,7 +1064,7 @@ registerDoSNOW(cl)
 # }
 
 # Load results from disk.
-rf.cv.4 <- readRDS("data/rf.cv.4.RData")
+rf.cv.4 <- load("data/rf.cv.4.RData")
 
 
 # Make predictions and drill-in on the results
@@ -1097,6 +1097,129 @@ confusionMatrix(preds, test.svd$label)
 # review along with the star rating. Ratings with 1-2 stars count as "negative", and ratings with 4-5 stars 
 # are "positive". Ratings with 3 stars are "neutral" and have been dropped from the data.
 
+# create list of packages
+packages <- c("tidyverse", "quanteda", "caret")
+
+# install any packages not currently installed
+if (any(!packages %in% installed.packages())) {
+  install.packages(packages[!packages %in% installed.packages()[,"Package"]])
+}
+
+# load packages
+lapply(packages, library, character.only = TRUE)
+
 d <- read_csv("data/yelp_ratings.csv")
 
+# creating training and test data
+# Use caret to create a 70%/30% stratified split. 
+# Set the random seed for reproducibility.
+set.seed(32984)
+indexes <- createDataPartition(d$sentiment, times = 1,
+                               p = 0.7, list = FALSE)
 
+train <- d[indexes,]
+test <- d[-indexes,]
+
+# Verify proportions are equivalent in the train and test datasets
+prop.table(table(train$sentiment))
+prop.table(table(test$sentiment))
+
+# Tokenize SMS text messages.
+# remove numbers, punctuation, symbols and split hyphenated words
+train.tokens <- tokens(train$text, what = "word1", 
+                       remove_numbers = TRUE, remove_punct = TRUE,
+                       remove_symbols = TRUE, split_hyphens = TRUE)
+  
+# clean tokens further: lower case, remove stopwords, and stem
+train.tokens <- train.tokens %>% 
+  tokens_tolower() %>% 
+  tokens_select(stopwords(), selection = "remove") %>% 
+  tokens_wordstem(language = "english")
+  
+# Create our first bag-of-words model.
+# dfm() takes in tokens and creates a document-frequency matrix (dfm)
+train.tokens.dfm <- dfm(train.tokens, tolower = FALSE)
+
+# to inspect
+# train.tokens.matrix <- as.matrix(train.tokens.dfm)
+
+# Per best practices, we will leverage cross validation (CV) as
+# the basis of our modeling process.
+
+# Setup data frame with features and labels.
+train.tokens.df <- bind_cols(y_labels = train$sentiment, convert(train.tokens.dfm, to = "data.frame"))
+
+# train <- train %>% 
+#   mutate(sentiment = factor(sentiment, levels = 0:1, labels = c("low", "high")))
+
+# Cleanup column names. Will modify only names that are not syntactically valid
+names(train.tokens.df) <- make.names(names(train.tokens.df))
+
+# Use caret to create stratified folds for 10-fold cross validation repeated 
+# 3 times (i.e., create 30 random stratified samples)
+# we are using stratified cross validation because we have a class imbalance 
+# in the data (spam < prevalent ham) each random sample taken is representative 
+# in terms of the proportion of spam and ham in the dataset
+# why are we repeating the cross validation 3 times? If we take the time to conduct 
+# cross validation multiple times we should get more valid estimates. If we take more 
+# looks at the data the estimation process will be more robust.
+
+set.seed(48743)
+cv.folds <- createMultiFolds(train$sentiment, k = 10, times = 3)
+
+cv.cntrl <- trainControl(method = "repeatedcv", 
+                         number = 10,
+                         repeats = 3, 
+                         index = cv.folds) # since we want stratified cross-validation we need to specify the folds
+
+
+# Our data frame is non-trivial in size. As such, CV runs will take 
+# quite a long time to run. To cut down on total execution time, use
+# the doSNOW package to allow for multi-core training in parallel.
+#
+# WARNING - The following code is configured to run on a workstation-
+#           or server-class machine (i.e., 12 logical cores). Alter
+#           code to suit your HW environment.
+#
+library(doSNOW) # doSNOW works on mac and windows out of box. Some other parallel processing packages do not.
+
+{
+  # Time the code execution
+  start.time <- Sys.time()
+  
+  # Create a cluster to work on 7 logical cores.
+  # check how many cores your machine has available for parallel processing
+  # keep 1 core free for the operating system
+  # parallel::detectCores()
+  cl <- makeCluster(7, type = "SOCK") # effectively creates multiple instances of R studio and uses them all at once to process the model
+  registerDoSNOW(cl) # need to tell R to process in parallel
+  
+  # As our data is non-trivial in size at this point, use a single decision
+  # tree alogrithm (rpart trees) as our first model. We will graduate to using more 
+  # powerful algorithms later when we perform feature extraction to shrink
+  # the size of our data.
+  # e.g., could use fandom forest (rf) or XGBoost (xgbTree) instead by changing the method
+  # formula means predict (~) label using all other variables (.) in dataset
+  # trControl is the cross validation parameters
+  # tuneLength allows you to set the number of different configurations of the algorithm to test
+  # it selects the one best one and builds a model using that configuration
+  rpart.cv.1 <- train(y_label ~ ., data = train.tokens.df, 
+                      method = "rpart", 
+                      trControl = cv.cntrl, 
+                      tuneLength = 7)
+  
+  # Processing is done, stop cluster.
+  stopCluster(cl)
+  
+  
+  # Total time of execution on workstation was approximately 4 minutes. 
+  total.time <- Sys.time() - start.time
+  total.time
+}
+
+# Check out our results.
+# samples = rows
+# predictors = features
+# best performing model had 94.78% accuracy
+# that's pretty good for a simple model with no tuning or feature engineering
+rpart.cv.1
