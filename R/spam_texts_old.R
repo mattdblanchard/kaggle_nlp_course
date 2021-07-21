@@ -1,148 +1,3 @@
-Sys.setenv('R_MAX_VSIZE'=32000000000)
-Sys.getenv('R_MAX_VSIZE')
-
-packages <- c("tidyverse", "quanteda", "doSNOW")
-# quanteda.textmodels - what does this package do?
-# doSNOW works on mac and windows out of box. Some other parallel processing packages do not.
-
-# install any packages not currently installed
-if (any(!packages %in% installed.packages())) {
-  install.packages(packages[!packages %in% installed.packages()[,"Package"]])
-}
-
-# load packages
-lapply(packages, library, character.only = TRUE)
-
-# create character string
-x <- c("Tea is healthy and calming, don't you think?")
-
-# tokenize character string (x)
-tokens <- tokens(x, what = "word1")
-
-
-# part 1 ------------------------------------------------------------------
-
-# text preprocessing ------------------------------------------------------
-# next need to stem/lemmatize words - this reduces each word to its base
-# e.g. calming becomes calm
-train_tokens <- tokens_wordstem(tokens, language = "english")
-
-# to remove punctuation, symbols, and numbers
-train_tokens <- tokens(train_tokens, what = "word1", 
-                       remove_numbers = TRUE, remove_punct = TRUE,
-                       remove_symbols = TRUE, split_hyphens = TRUE)
-
-# when analysing text need often you will remove stop words ("the", "is" etc..)
-# NOTE - You should always inspect stopword lists for applicability to
-#        your problem/domain.
-# check stopwords() to make sure important domain specific words are not removed
-train_tokens <- tokens_select(train_tokens, stopwords(), 
-                              selection = "remove")
-
-# stemming/lemmatizing and dropping stopwords might result in your models performing worse
-# so treat this preprocessing as part of your hyperparameter optimization process
-
-
-# pattern matching --------------------------------------------------------
-# select target patterns
-target <- phrase(c('Galaxy Note', 'iPhone 11', 'iPhone XS', 'Google Pixel'))
-
-# create text doc of phone reviews
-text_doc <- c("Glowing review overall, and some really interesting side-by-side ",
-               "photography tests pitting the iPhone 11 Pro against the ",
-               "Galaxy Note 10 Plus and last year’s iPhone XS and Google Pixel 3.") 
-
-# identify the occurrence of each target pattern in the phone reviews
-match <- data.frame(kwic(text_doc, pat1, valuetype = "glob"))
-
-
-# exercise ----------------------------------------------------------------
-# could load data from kaggle URL
-# library(httr)
-# library(jsonlite)
-# url <- "https://storage.googleapis.com/kagglesdsdata/datasets/362178/763778/restaurant.json?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=gcp-kaggle-com%40kaggle-161607.iam.gserviceaccount.com%2F20210428%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20210428T000547Z&X-Goog-Expires=259199&X-Goog-SignedHeaders=host&X-Goog-Signature=2196ef69eba0b202dd8ff55753f17ab1aecb5557e8d99610435341ad3c4ba959ba7911fb24e860d6c45b7d0b123bedfd7bc28a4bb102b038cf123e3d3d2e05b9274d5aa2de6c71b2e345271069883fcd0e17c15d7c31bcb5132e84ff2e213b7fdbca1e3881d6ecaef33362bdaf24e144355ccc07d2170dff790e4725b2d83853826f68649634805af60b4d6828459c86f06a8caa68213f121cab77d8d3db6d2ab06f3fab4e8191685f79efcc17310e980ec763170d5bbed8ce7a27292974d427771e68ccd063fbe723d49d64571b6475f50bf4c443cbe6d10777d106d44b7db50f51d3ee7945db311120042f45dfbb55c9738f96a505e3733243281749ea09de"
-# resp <- GET(url)
-# http_error(resp)
-# parsed_resp <- content(resp, as="parsed")
-
-# load yelp review data
-d <- read_csv("data/yelp_ratings.csv")
-
-# tokenize character string (text)
-tokens <- tokens(d$text, what = "word1")
-
-# text preprocessing ------------------------------------------------------
-# stem/lemmatize words - this reduces each word to its base
-# e.g. calming becomes calm
-train_tokens <- tokens_wordstem(tokens, language = "english")
-
-# remove punctuation, symbols, and numbers
-train_tokens <- tokens(train_tokens, what = "word1", 
-                       remove_numbers = TRUE, remove_punct = TRUE,
-                       remove_symbols = TRUE, split_hyphens = TRUE)
-
-# remove stop words ("the", "is" etc..)
-# stopwords()
-train_tokens <- tokens_select(train_tokens, stopwords(), 
-                              selection = "remove")
-
-# menu items
-target <- c("Cheese Steak", "Cheesesteak", "Steak and Cheese", "Italian Combo", "Tiramisu", "Cannoli",
-          "Chicken Salad", "Chicken Spinach Salad", "Meatball", "Pizza", "Pizzas", "Spaghetti",
-          "Bruchetta", "Eggplant", "Italian Beef", "Purista", "Pasta", "Calzones",  "Calzone",
-          "Italian Sausage", "Chicken Cutlet", "Chicken Parm", "Chicken Parmesan", "Gnocchi",
-          "Chicken Pesto", "Turkey Sandwich", "Turkey Breast", "Ziti", "Portobello", "Reuben",
-          "Mozzarella Caprese",  "Corned Beef", "Garlic Bread", "Pastrami", "Roast Beef",
-          "Tuna Salad", "Lasagna", "Artichoke Salad", "Fettuccini Alfredo", "Chicken Parmigiana",
-          "Grilled Veggie", "Grilled Veggies", "Grilled Vegetable", "Mac and Cheese", "Macaroni",  
-          "Prosciutto", "Salami")
-
-# identify the occurrence of each target pattern in the phone reviews
-match <- data.frame(kwic(train_tokens, target, valuetype = "glob"))
-
-# create index of rows that contain a review with a target word
-index <- match %>% 
-  mutate(text_num = str_remove(docname, "text")) %>% 
-  select(keyword, text_num) %>% 
-  unique()
-
-# select reviews with target words
-select_reviews <- d[as.numeric(index$text_num), ]
-
-# create df of keywords to add to select_reviews
-key <- match %>% 
-  select(docname, keyword) %>% 
-  unique() %>% 
-  mutate(keyword = tolower(keyword))
-
-# add keywords
-select_reviews <- select_reviews %>% 
-  bind_cols(keyword = key$keyword) 
-
-# compute the mean and sd number of stars and the number of reviews for each keyword 
-# important to consider the number of occurrences
-scores <- select_reviews %>%   
-  group_by(keyword) %>% 
-  summarise(mean = mean(stars),
-            sd = sd(stars),
-            n = n()) %>% 
-  arrange(mean)
-
-# top 10 mean ratings
-slice_max(scores, mean, n = 10)
-
-# worst 10 mean ratings
-slice_min(scores, mean, n = 10)
-
-
-# part 2 ------------------------------------------------------------------
-# This code was recycled from another NLP course I completed because it uses the same spam dataset
-# This code goes far beyond the content of Kaggle's course
-# The other course is:
-# Data Science Dojo's Intro to Text Analytics with R
-# # https://code.datasciencedojo.com/datasciencedojo/tutorials/tree/master/Introduction%20to%20Text%20Analytics%20with%20R
-# # Videos on youtube: https://youtu.be/4vuw0AsHeGw
-
 # create list of packages
 packages <- c("tidyverse", "quanteda", "caret")
 
@@ -154,33 +9,8 @@ if (any(!packages %in% installed.packages())) {
 # load packages
 lapply(packages, library, character.only = TRUE)
 
-# read data and calculate text length
-d <- read_csv("data/spam.csv") %>% 
-  mutate(text_length = nchar(text))
-
-# look at a histogram of text_length
-# can see that overwhelming number of short texts are ham
-# text_length could be a useful feature when we fit ML
-d %>% 
-  ggplot(aes(x = text_length, fill = label)) +
-  theme_bw() +
-  geom_histogram(binwidth = 5) +
-  labs(y = "Text Count", x = "Length of Text",
-       title = "Distribution of Text Lengths with Class labels")
-
-# creating training and test data
-# Use caret to create a 70%/30% stratified split. 
-# Set the random seed for reproducibility.
-set.seed(32984)
-indexes <- createDataPartition(d$label, times = 1,
-                               p = 0.7, list = FALSE)
-
-train <- d[indexes,]
-test <- d[-indexes,]
-
-# Verify proportions are equivalent in the train and test datasets
-prop.table(table(train$label))
-prop.table(table(test$label))
+# read data
+d <- read_csv("data/spam.csv")
 
 # need to convert unstructured text data into a structured dataframe
 # first need to decompose text document into distinct pieces (tokens)
@@ -210,111 +40,58 @@ prop.table(table(test$label))
 # Text analytics requires a lot of data exploration, data pre-processing
 # and data wrangling. Let's explore some examples.
 
-# HTML-escaped ampersand character. This is an example of how html records &
-# there are 5 characters instead of 1
-# could replace all instances of escaped sequence with and or & or something else
-# or could remove & and ; to leave amp behind
-train$text[20]
-
-# HTML-escaped '<' (&lt;) and '>' (#&gt;) characters. 
-# remove &, ;, and # so only lt and gt remain
-# Also note that Mallika Sherawat is an actual person, but we will ignore 
-# the implications of this for this introductory tutorial.
-test$text[16]
-
-# A URL.
-# lots of ways to treat URLs
-# for this course we will split http and the www... web address
-# reasoning is that web addresses probably won't reoccur but http will indicate that a web address was communicated and that may be an important feature
-train$text[381]
-
 # Tokenize SMS text messages.
 # remove numbers, punctuation, symbols and split hyphenated words
-train.tokens <- tokens(train$text, what = "word1", 
-                       remove_numbers = TRUE, remove_punct = TRUE,
-                       remove_symbols = TRUE, split_hyphens = TRUE)
+d.tokens <- tokens(d$text, what = "word1", 
+                   remove_numbers = TRUE, remove_punct = TRUE,
+                   remove_symbols = TRUE, split_hyphens = TRUE)
 
-# Take a look at a specific SMS message and see how it transforms.
-train.tokens[[381]]
-
-# Lower case the tokens.
-train.tokens <- tokens_tolower(train.tokens)
-
-train.tokens[[381]]
-
-# Use quanteda's built-in stopword list for English.
-# NOTE - You should always inspect stopword lists for applicability to
-#        your problem/domain.
-train.tokens <- tokens_select(train.tokens, stopwords(), 
-                              selection = "remove")
-train.tokens[[381]]
-
-# Perform stemming on the tokens.
-train.tokens <- tokens_wordstem(train.tokens, language = "english")
-train.tokens[[381]]
+# clean tokens further: lower case, remove stopwords, and stem
+d.tokens <- d.tokens %>% 
+  tokens_tolower() %>% 
+  tokens_select(stopwords(), selection = "remove") %>% 
+  tokens_wordstem(language = "english")
 
 # Create our first bag-of-words model.
 # dfm() takes in tokens and creates a document-frequency matrix (dfm)
-train.tokens.dfm <- dfm(train.tokens, tolower = FALSE)
-
-# Transform to a matrix and inspect.
-train.tokens.matrix <- as.matrix(train.tokens.dfm)
-View(train.tokens.matrix[1:20, 1:100])
-dim(train.tokens.matrix)
-
-# Investigate the effects of stemming.
-colnames(train.tokens.matrix)[1:50]
+d.tokens.dfm <- dfm(d.tokens, tolower = FALSE)
 
 # Per best practices, we will leverage cross validation (CV) as
-# the basis of our modeling process. Using CV we can create 
-# estimates of how well our model will do in Production on new,
-# unseen data. CV is powerful, but the downside is that it
-# requires more processing and therefore more time.
-#
-# If you are not familiar with CV, consult the following 
-# Wikipedia article:
-#
-#   https://en.wikipedia.org/wiki/Cross-validation_(statistics)
-#
+# the basis of our modeling process.
 
-# Setup a feature data frame with labels.
-train.tokens.df <- bind_cols(label = train$label, convert(train.tokens.dfm, to = "data.frame"))
-View(train.tokens.df)
-# Often, tokenization requires some additional pre-processing
-# col names are the words in texts. Some of the column names will
-# create problems later so we need to clean them up. Here are examples
-# of problematic names
-names(train.tokens.df)[c(139, 141, 211, 213)]
+# Setup data frame with features and labels.
+d.tokens.df <- bind_cols(y_labels = d$label, convert(d.tokens.dfm, to = "data.frame"))
 
 # Cleanup column names. Will modify only names that are not syntactically valid
-names(train.tokens.df) <- make.names(names(train.tokens.df))
+# make.names creates duplicate column names. Need to manually change those name before running make.names
+d.tokens.df <- d.tokens.df %>% rename(s_i_m = s.i.m)
 
-# Use caret to create stratified folds for 10-fold cross validation repeated 
-# 3 times (i.e., create 30 random stratified samples)
-# we are using stratified cross validation because we have a class imbalance 
-# in the data (spam < prevalent ham) each random sample taken is representative 
-# in terms of the proportion of spam and ham in the dataset
-# why are we repeating the cross validation 3 times? If we take the time to conduct 
-# cross validation multiple times we should get more valid estimates. If we take more 
-# looks at the data the estimation process will be more robust.
+names(d.tokens.df) <- make.names(names(d.tokens.df))
 
-set.seed(48743)
-cv.folds <- createMultiFolds(train$label, k = 10, times = 3)
+d.tokens.df <- d.tokens.df %>% 
+  mutate(s.i.m = s.i.m + s_i_m) %>% 
+  select(-s_i_m)
 
-cv.cntrl <- trainControl(method = "repeatedcv", 
-                         number = 10,
-                         repeats = 3, 
-                         index = cv.folds) # since we want stratified cross-validation we need to specify the folds
+# check that each column name only occurs once
+data.frame(name = names(d.tokens.df)) %>% 
+  group_by(name) %>% 
+  mutate(n = n()) %>% 
+  filter(n != 1)
 
+# train.tokens.df <- as_tibble(train.tokens.df)
+# creating training and test data
+# Use caret to create a 70%/30% stratified split. 
+# Set the random seed for reproducibility.
+set.seed(32984)
+indexes <- createDataPartition(d.tokens.df$y_labels, times = 1,
+                               p = 0.7, list = FALSE)
 
-# Our data frame is non-trivial in size. As such, CV runs will take 
-# quite a long time to run. To cut down on total execution time, use
-# the doSNOW package to allow for multi-core training in parallel.
-#
-# WARNING - The following code is configured to run on a workstation-
-#           or server-class machine (i.e., 12 logical cores). Alter
-#           code to suit your HW environment.
-#
+train <- d.tokens.df[indexes,]
+test <- d.tokens.df[-indexes,]
+
+# Verify proportions are equivalent in the train and test datasets
+prop.table(table(train$y_labels))
+prop.table(table(test$y_labels))
 
 # fit a single tree model
 if (file.exists("data/rpart.cv.1.RData")) {
@@ -324,6 +101,32 @@ if (file.exists("data/rpart.cv.1.RData")) {
   
 } else {
   
+# Use caret to create stratified folds for 10-fold cross validation repeated 
+# 3 times (i.e., create 30 random stratified samples)
+# we are using stratified cross validation because we have a class imbalance 
+# in the data (spam < prevalent ham) each random sample taken is representative 
+# in terms of the proportion of spam and ham in the dataset
+# why are we repeating the cross validation 3 times? If we take the time to conduct 
+# cross validation multiple times we should get more valid estimates. If we take more 
+# looks at the data the estimation process will be more robust.
+
+cv.folds <- createMultiFolds(train$y_labels, k = 10, times = 3)
+
+cv.cntrl <- trainControl(method = "repeatedcv", 
+                         number = 10,
+                         repeats = 3, 
+                         index = cv.folds) # since we want stratified cross-validation we need to specify the folds
+
+# Our data frame is non-trivial in size. As such, CV runs will take 
+# quite a long time to run. To cut down on total execution time, use
+# the doSNOW package to allow for multi-core training in parallel.
+#
+# WARNING - The following code is configured to run on a machine with 8 cores. 
+#           Alter code to suit your computer.
+#
+library(doSNOW) # doSNOW works on mac and windows out of box. Some other parallel processing packages do not.
+
+{
   # Time the code execution
   start.time <- Sys.time()
   
@@ -343,7 +146,7 @@ if (file.exists("data/rpart.cv.1.RData")) {
   # trControl is the cross validation parameters
   # tuneLength allows you to set the number of different configurations of the algorithm to test
   # it selects the one best one and builds a model using that configuration
-  rpart.cv.1 <- train(label ~ ., data = train.tokens.df, 
+  rpart.cv.1 <- train(y_labels ~ ., data = train, 
                       method = "rpart", 
                       trControl = cv.cntrl, 
                       tuneLength = 7)
@@ -351,12 +154,12 @@ if (file.exists("data/rpart.cv.1.RData")) {
   # Processing is done, stop cluster.
   stopCluster(cl)
   
-  # save model for quick loading next time
   save(rpart.cv.1, file = "data/rpart.cv.1.RData")
   
   # Total time of execution on workstation was approximately 4 minutes. 
   total.time <- Sys.time() - start.time
   total.time
+}
 }
 
 # Check out our results.
@@ -412,6 +215,13 @@ tf.idf <- function(tf, idf) {
   tf * idf
 }
 
+# subset dfm to train and test sets
+train.tokens.dfm <- dfm_subset(d.tokens.dfm, rownames(d.tokens.dfm) %in% train$doc_id)
+test.tokens.dfm <- dfm_subset(d.tokens.dfm, rownames(d.tokens.dfm) %in% test$doc_id)
+
+# transform to a matrix
+train.tokens.matrix <- as.matrix(train.tokens.dfm)
+test.tokens.matrix <- as.matrix(test.tokens.dfm)
 
 # First step, normalize all documents via TF.
 # apply term frequency (TF) function to the rows (1) of train.tokens.matrix
@@ -451,18 +261,10 @@ dim(train.tokens.tfidf)
 sum(which(!complete.cases(train.tokens.tfidf)))
 
 # Make a clean data frame using the same process as before.
-train.tokens.tfidf.df <- cbind(y_label = train$label, data.frame(train.tokens.tfidf))
+train.tokens.tfidf.df <- cbind(y_labels = train$y_labels, data.frame(train.tokens.tfidf))
 names(train.tokens.tfidf.df) <- make.names(names(train.tokens.tfidf.df))
 
-
-# fit random forest model
-if (file.exists("data/rpart.cv.2.RData")) {
-  
-  # load single tree model
-  load("data/rpart.cv.2.RData")
-
-} else {
-  
+{
   # Time the code execution
   start.time <- Sys.time()
   
@@ -474,14 +276,11 @@ if (file.exists("data/rpart.cv.2.RData")) {
   # tree alogrithm as our first model. We will graduate to using more 
   # powerful algorithms later when we perform feature extraction to shrink
   # the size of our data.
-  rpart.cv.2 <- train(y_label ~ ., data = train.tokens.tfidf.df, method = "rpart", 
+  rpart.cv.2 <- train(y_labels ~ ., data = train.tokens.tfidf.df, method = "rpart", 
                       trControl = cv.cntrl, tuneLength = 7)
   
   # Processing is done, stop cluster.
   stopCluster(cl)
-  
-  # save model for quick loading next time
-  save(rpart.cv.2, file = "data/rpart.cv.2.RData")
   
   # Total time of execution on workstation was 
   total.time <- Sys.time() - start.time
@@ -545,6 +344,8 @@ gc()
 #        38GB of RAM and more than 4.5 hours to execute on a 10-core 
 #        workstation!
 #
+#       Can log a request with infomatics hub? for USyd's HPC or use a cloud computing platform like Azure.
+
 
 # Time the code execution
 # start.time <- Sys.time()
@@ -681,34 +482,24 @@ train.irlba$v[1, 1:10] # there will likely be some minor differences in the valu
 # Create new feature data frame using our document semantic space of 300
 # features (i.e., the V matrix from our SVD).
 # we are adding the labels (ham or spam) to the new training data (extracted document features)
-train.svd <- data.frame(y_labels = train$label, train.irlba$v)
+train.svd <- data.frame(label = train$label, train.irlba$v)
 
-# fit single tree model to svd data
-if (file.exists("data/rpart.cv.4.RData")) {
-  
-  # load single tree model
-  load("data/rpart.cv.4.RData")
-  
-  } else {
-  
+# Create a cluster to work on 7 logical cores.
+cl <- makeCluster(7, type = "SOCK")
+registerDoSNOW(cl)
+
+{
   # Time the code execution
   start.time <- Sys.time()
-  
-  # Create a cluster to work on 7 logical cores.
-  cl <- makeCluster(7, type = "SOCK")
-  registerDoSNOW(cl)
   
   # This will be the last run using single decision trees. With a much smaller
   # feature matrix we can now use more powerful methods like the mighty Random
   # Forest from now on!
-  rpart.cv.4 <- train(y_labels ~ ., data = train.svd, method = "rpart", 
+  rpart.cv.4 <- train(label ~ ., data = train.svd, method = "rpart", 
                       trControl = cv.cntrl, tuneLength = 7)
   
   # Processing is done, stop cluster.
   stopCluster(cl)
-  
-  # save model for quick loading next time
-  save(rpart.cv.4, file = "data/rpart.cv.4.RData")
   
   # Total time of execution on workstation was 
   total.time <- Sys.time() - start.time
@@ -738,48 +529,39 @@ rpart.cv.4
 # to execute.
 #
 
-# fit single tree model to svd data
-if (file.exists("data/rf.cv.1.RData")) {
-  
-  # load model
-  load("data/rf.cv.1.RData")
-  
-} else {
-  
-# Create a cluster to work on 7 logical cores.
-cl <- makeCluster(7, type = "SOCK")
-registerDoSNOW(cl)
+# Create a cluster to work on 10 logical cores.
+# cl <- makeCluster(3, type = "SOCK")
+# registerDoSNOW(cl)
 
 # Time the code execution
-start.time <- Sys.time()
+# start.time <- Sys.time()
 
-# We have reduced the dimensionality of our data using SVD. Also, the
+# We have reduced the dimensionality of our data using SVD. Also, the 
 # application of SVD allows us to use LSA to simultaneously increase the
-# information density of each feature. To prove this out, leverage a
+# information density of each feature. To prove this out, leverage a 
 # mighty Random Forest with the default of 500 trees. We'll also ask
-# caret to try 7 different values of mtry to find the mtry value that
+# caret to try 7 different values of mtry to find the mtry value that 
 # gives the best result!
-rf.cv.1 <- train(y_labels ~ ., data = train.svd, method = "rf",
-                trControl = cv.cntrl, tuneLength = 7)
+# rf.cv.1 <- train(label ~ ., data = train.svd, method = "rf", 
+#                 trControl = cv.cntrl, tuneLength = 7)
 
 # Processing is done, stop cluster.
-stopCluster(cl)
+# stopCluster(cl)
 
-# save model for quick loading next time
-save(rf.cv.1, file = "data/rf.cv.1.RData")
+# Total time of execution on workstation was 
+# total.time <- Sys.time() - start.time
+# total.time
 
-# Total time of execution on workstation was
-total.time <- Sys.time() - start.time
-total.time
 
-}
+# Load processing results from disk!
+load("data/rf.cv.1.RData")
 
 # Check out our results.
 # mtry is a parameter that controls how much data gets used when building individual trees 
 # in other words mytry constrains the amount of data each tree gets to see
 # mytry = 151 means the trees get to see 151 of the 300 features extracted using SVD
 rf.cv.1
-
+rf.cv.1$finalModel$confusion
 # Let's drill-down on the results.
 # code originally sourced labels from train.svd$label
 # but this created errors for some reason the ordering is different
@@ -812,37 +594,30 @@ confusionMatrix(rf.cv.1$finalModel$y, rf.cv.1$finalModel$predicted)
 # if I run this code will need to check this
 train.svd <- bind_cols(train.svd, train %>% select(text_length))
 
-if (file.exists("data/rf.cv.2.RData")) {
-  
-  # load model
-  load("data/rf.cv.2.RData")
-  
-} else {
+# Create a cluster to work on 10 logical cores.
+# cl <- makeCluster(3, type = "SOCK")
+# registerDoSNOW(cl)
 
-# Create a cluster to work on 7 logical cores.
-cl <- makeCluster(7, type = "SOCK")
-registerDoSNOW(cl)
-
+{
   # Time the code execution
-  start.time <- Sys.time()
-
+  # start.time <- Sys.time()
+  
   # Re-run the training process with the additional feature.
   # importance = TRUE asks the rf model to keep track of feature importance
-  rf.cv.2 <- train(y_labels ~ ., data = train.svd, method = "rf",
-                  trControl = cv.cntrl, tuneLength = 7,
-                  importance = TRUE)
-
-  # Processing is done, stop cluster.
-  stopCluster(cl)
+  # rf.cv.2 <- train(label ~ ., data = train.svd, method = "rf",
+  #                 trControl = cv.cntrl, tuneLength = 7, 
+  #                 importance = TRUE)
   
-  # save model for quick loading next time
-  save(rf.cv.2, file = "data/rf.cv.2.RData")
-
-# Total time of execution on workstation was
-total.time <- Sys.time() - start.time
-total.time
-
+  # Processing is done, stop cluster.
+  # stopCluster(cl)
+  
+  # Total time of execution on workstation was 
+  # total.time <- Sys.time() - start.time
+  # total.time
 }
+
+# Load results from disk.
+load("data/rf.cv.2.RData")
 
 # Check the results.
 rf.cv.2
@@ -856,6 +631,7 @@ library(randomForest)
 varImpPlot(rf.cv.1$finalModel)
 varImpPlot(rf.cv.2$finalModel)
 
+
 # Turns out that our TextLength feature is very predictive and pushed our
 # overall accuracy over the training data to 97.1%. We can also use the
 # power of cosine similarity to engineer a feature for calculating, on 
@@ -864,7 +640,7 @@ varImpPlot(rf.cv.2$finalModel)
 # produced a representation where ham SMS messages should have low cosine
 # similarities with spam SMS messages and vice versa.
 
-# the angle between two docs is represented by theta. 
+# he angle between two docs is represented by theta. 
 # cosine(theta) is the similarity between two docs
 # using the cosine between docs is better than using the dot product (correlation proxy)
 # for a few reasons:
@@ -880,8 +656,8 @@ library(lsa)
 train.similarities <- cosine(t(as.matrix(train.svd[, -c(1, ncol(train.svd))])))
 dim(train.similarities)
 
-# Next up - take each SMS text message and find what the mean cosine similarity
-# is for each SMS text mean with each of the spam SMS messages.
+# Next up - take each SMS text message and find what the mean cosine 
+# similarity is for each SMS text mean with each of the spam SMS messages.
 # Per our hypothesis, ham SMS text messages should have relatively low
 # cosine similarities with spam messages and vice versa!
 # give me the indices of all spam messages
@@ -898,58 +674,54 @@ train.svd <- train.svd %>% mutate(spam_similarity = 0)
 # you should exclude the observation itself from the spam messages list.
 # This solves the data leakage problem leading to over-fitting. The RF results
 # on test data with updated feature are much better:
-for(i in 1:nrow(train.svd)) {
-spam.indexesCV <- setdiff(spam.indexes,i)
-train.svd$spam_similarity[i] <- mean(train.similarities[i, spam.indexesCV])
-}
-
 # for(i in 1:nrow(train.svd)) {
-#   train.svd$spam_similarity[i] <- mean(train.similarities[i, spam.indexes])  
+# spam.indexesCV <- setdiff(spam.indexes,i)
+# train.svd$spam_similarity[i] <- mean(train.similarities[i, spam.indexesCV])
 # }
 
-# As always, let's visualize our results
-ggplot(train.svd, aes(x = spam_similarity, fill = y_labels)) +
+
+for(i in 1:nrow(train.svd)) {
+  train.svd$spam_similarity[i] <- mean(train.similarities[i, spam.indexes])  
+}
+
+# As always, let's visualize our results using the mighty ggplot2
+ggplot(train.svd, aes(x = spam_similarity, fill = label)) +
   theme_bw() +
   geom_histogram(binwidth = 0.05) +
   labs(y = "Message Count",
        x = "Mean Spam Message Cosine Similarity",
        title = "Distribution of Ham vs. Spam Using Spam Cosine Similarity")
 
+
 # Per our analysis of mighty random forest results, we are interested in 
 # in features that can raise model performance with respect to sensitivity.
 # Perform another CV process using the new spam cosine similarity feature.
 
-if (file.exists("data/rf.cv.3.RData")) {
-  
-  # load model
-  rf.cv.3 <- load("data/rf.cv.3.RData")
+# # Create a cluster to work on 3 logical cores.
+# cl <- makeCluster(3, type = "SOCK")
+# registerDoSNOW(cl)
+# 
+# {
+# # Time the code execution
+# start.time <- Sys.time()
+# 
+# # Re-run the training process with the additional feature.
+# rf.cv.3 <- train(label ~ ., data = train.svd, method = "rf",
+#                 trControl = cv.cntrl, tuneLength = 7,
+#                 importance = TRUE)
+# 
+# # Processing is done, stop cluster.
+# stopCluster(cl)
+# 
+# # Total time of execution on workstation was
+# total.time <- Sys.time() - start.time
+# total.time
+# 
+# saveRDS(rf.cv.3, "data/rf.cv.3.RDS")
+# }
 
-} else {
-
-  # Create a cluster to work on 3 logical cores.
-cl <- makeCluster(7, type = "SOCK")
-registerDoSNOW(cl)
-
-# Time the code execution
-start.time <- Sys.time()
-
-# Re-run the training process with the additional feature.
-rf.cv.3 <- train(y_labels ~ ., data = train.svd, method = "rf",
-                trControl = cv.cntrl, tuneLength = 7,
-                importance = TRUE)
-
-# Processing is done, stop cluster.
-stopCluster(cl)
-
-# save model for quick loading next time
-save(rf.cv.3, file = "data/rf.cv.3.RData")
-
-# Total time of execution on workstation was
-total.time <- Sys.time() - start.time
-total.time
-
-
-}
+# Load results from disk.
+rf.cv.3 <- readRDS("data/rf.cv.3.RDS")
 
 # Check the results.
 rf.cv.3
@@ -1091,48 +863,38 @@ confusionMatrix(preds, test.svd$label)
 
 # The definition of overfitting is doing far better on the training data as
 # evidenced by CV than doing on a hold-out dataset (i.e., our test dataset).
-# One potential explanation for this overfitting is the use of the spam similarity
+# One potential explantion of this overfitting is the use of the spam similarity
 # feature. The hypothesis here is that spam features (i.e., text content) varies
-# highly, especially over time. As such, our average spam cosine similarity 
+# highly, espeically over time. As such, our average spam cosine similarity 
 # is likely to overfit to the training data. To combat this, let's rebuild a
-# random forest without the spam similarity feature.
+# mighty random forest without the spam similarity feature.
 train.svd$SpamSimilarity <- NULL
 test.svd$SpamSimilarity <- NULL
 
 
-# fit random forest without the spam similarity feature
-if (file.exists("data/rf.cv.4.RData")) {
-  
-  # load model
-  load("data/rf.cv.4.RData")
-  
-} else {
-  
-# Create a cluster to work on 7 cores.
-cl <- makeCluster(7, type = "SOCK")
+# Create a cluster to work on 3 logical cores.
+cl <- makeCluster(3, type = "SOCK")
 registerDoSNOW(cl)
 
+# {
 # # Time the code execution
-start.time <- Sys.time()
-
-# Re-run the training process with the additional feature.
-set.seed(254812)
-rf.cv.4 <- train(y_labels ~ ., data = train.svd, method = "rf",
-                 trControl = cv.cntrl, tuneLength = 7,
-                 importance = TRUE)
-
-# Processing is done, stop cluster.
-stopCluster(cl)
-
-# save model for quick loading next time
-save(rf.cv.4, "data/rf.cv.4.RData")
- 
-# Total time of execution on workstation was
-total.time <- Sys.time() - start.time
-total.time
-
-}
-
+# start.time <- Sys.time()
+# 
+# # Re-run the training process with the additional feature.
+# set.seed(254812)
+# rf.cv.4 <- train(label ~ ., data = train.svd, method = "rf",
+#                  trControl = cv.cntrl, tuneLength = 7,
+#                  importance = TRUE)
+# 
+# # Processing is done, stop cluster.
+# stopCluster(cl)
+# 
+# # Total time of execution on workstation was
+# total.time <- Sys.time() - start.time
+# total.time
+# saveRDS(rf.cv.4, "d
+#ata/rf.cv.4.RDS")
+# }
 
 # Load results from disk.
 rf.cv.4 <- load("data/rf.cv.4.RData")
@@ -1158,159 +920,3 @@ confusionMatrix(preds, test.svd$label)
 # ▪ Best introduction to thinking analytically about text.
 # ▪ Accessible to a very broad audience. 
 # ▪ Illustrated many techniques not in series (e.g., topic modeling).
-
-
-
-
-# exercise ----------------------------------------------------------------
-# You will first build a model to distinguish positive reviews from negative reviews using Yelp reviews 
-# because these reviews include a rating with each review. Your data consists of the text body of each 
-# review along with the star rating. Ratings with 1-2 stars count as "negative", and ratings with 4-5 stars 
-# are "positive". Ratings with 3 stars are "neutral" and have been dropped from the data.
-options("expressions"=500000)
-
-# create list of packages
-packages <- c("tidyverse", "quanteda", "caret", "textcat")
-
-# install any packages not currently installed
-if (any(!packages %in% installed.packages())) {
-  install.packages(packages[!packages %in% installed.packages()[,"Package"]])
-}
-
-# load packages
-lapply(packages, library, character.only = TRUE)
-
-# read data and remove reviews that are not in English
-d <- read_csv("data/yelp_ratings.csv")[1:5000,]
-  # filter(!str_detect(text, "终于系scarborough开左分店")) %>% 
-  # mutate(lang = textcat(text)) %>% 
-  # filter(lang %in% c("english", "scots", "middle_frisian", "frisian", "catalan", "latin", "romanian", "danish", "slovak-ascii", NA, "manx",
-  #                    "afrikaans", "rumantsch", "esperanto", "finnish"))
-
-# Tokenize SMS text messages.
-# remove numbers, punctuation, symbols and split hyphenated words
-d.tokens <- tokens(d$text, what = "word1", 
-                       remove_numbers = TRUE, remove_punct = TRUE,
-                       remove_symbols = TRUE, split_hyphens = TRUE)
-
-# clean tokens further: lower case, remove stopwords, and stem
-d.tokens <- d.tokens %>% 
-  tokens_tolower() %>% 
-  tokens_select(stopwords(), selection = "remove") %>% 
-  tokens_wordstem(language = "english")
-
-# Create our first bag-of-words model.
-# dfm() takes in tokens and creates a document-frequency matrix (dfm)
-d.tokens.dfm <- dfm(d.tokens, tolower = FALSE)
-
-# to inspect
-# train.tokens.matrix <- as.matrix(train.tokens.dfm)
-
-# Per best practices, we will leverage cross validation (CV) as
-# the basis of our modeling process.
-
-# Setup data frame with features and labels.
-# d.tokens.df <- bind_cols(y_labels = d$sentiment, convert(d.tokens.dfm, to = "data.frame"))
-
-# subset data
-d.tokens.df <- bind_cols(y_labels = d$sentiment, convert(d.tokens.dfm, to = "data.frame"))
-
-# train <- train %>% 
-#   mutate(sentiment = factor(sentiment, levels = 0:1, labels = c("low", "high")))
-
-# Cleanup column names. Will modify only names that are not syntactically valid
-# make.names turns ' into . so it creates duplicate names. Need to manually change those name before running make.names
-# d.tokens.df <- d.tokens.df %>% rename(b_c = `b'c`, o_noir = `o'noir`)
-
-names(d.tokens.df) <- make.names(names(d.tokens.df))
-
-# check that each column name only occurs once
-data.frame(name = names(d.tokens.df)) %>% 
-  group_by(name) %>% 
-  mutate(n = n()) %>% 
-  filter(n != 1)
-
-# train.tokens.df <- as_tibble(train.tokens.df)
-# creating training and test data
-# Use caret to create a 70%/30% stratified split. 
-# Set the random seed for reproducibility.
-set.seed(32984)
-indexes <- createDataPartition(d.tokens.df$y_labels, times = 1,
-                               p = 0.7, list = FALSE)
-
-train.tokens.df <- d.tokens.df[indexes,]
-test.tokens.df <- d.tokens.df[-indexes,]
-
-# Verify proportions are equivalent in the train and test datasets
-prop.table(table(train.tokens.df$y_labels))
-prop.table(table(test.tokens.df$y_labels))
-
-# Use caret to create stratified folds for 10-fold cross validation repeated 
-# 3 times (i.e., create 30 random stratified samples)
-# we are using stratified cross validation because we have a class imbalance 
-# in the data (negative < positive reviews) each random sample taken is representative 
-# in terms of the proportion of spam and ham in the dataset
-# why are we repeating the cross validation 3 times? If we take the time to conduct 
-# cross validation multiple times we should get more valid estimates. If we take more 
-# looks at the data the estimation process will be more robust.
-
-set.seed(48743)
-cv.folds <- createMultiFolds(train.tokens.df$y_labels, k = 10, times = 3)
-
-cv.cntrl <- trainControl(method = "repeatedcv", 
-                         number = 10,
-                         repeats = 3, 
-                         index = cv.folds) # since we want stratified cross-validation we need to specify the folds
-
-# Our data frame is non-trivial in size. As such, CV runs will take 
-# quite a long time to run. To cut down on total execution time, use
-# the doSNOW package to allow for multi-core training in parallel.
-#
-# WARNING - The following code is configured to run on a workstation-
-#           or server-class machine (i.e., 12 logical cores). Alter
-#           code to suit your HW environment.
-
-library(doSNOW) # doSNOW works on mac and windows out of box. Some other parallel processing packages do not.
-
-{
-  # Time the code execution
-  start.time <- Sys.time()
-  
-  # Create a cluster to work on 7 logical cores.
-  # check how many cores your machine has available for parallel processing
-  # keep 1 core free for the operating system
-  # parallel::detectCores()
-  cl <- makeCluster(7, type = "SOCK") # effectively creates multiple instances of R studio and uses them all at once to process the model
-  registerDoSNOW(cl) # need to tell R to process in parallel
-  
-  # As our data is non-trivial in size at this point, use a single decision
-  # tree alogrithm (rpart trees) as our first model. We will graduate to using more 
-  # powerful algorithms later when we perform feature extraction to shrink
-  # the size of our data.
-  # e.g., could use random forest (rf) or XGBoost (xgbTree) instead by changing the method
-  # formula means predict (~) label using all other variables (.) in dataset
-  # trControl is the cross validation parameters
-  # tuneLength allows you to set the number of different configurations of the algorithm to test
-  # it selects the one best one and builds a model using that configuration
-  rpart.cv.1 <- train(y_labels ~ ., data = train.tokens.df, 
-                      method = "rpart", 
-                      trControl = cv.cntrl, 
-                      tuneLength = 7)
-  
-  # Processing is done, stop cluster.
-  stopCluster(cl)
-  
-  
-  # Total time of execution on workstation was approximately 4 minutes. 
-  total.time <- Sys.time() - start.time
-  total.time
-}
-
-# Check out our results.
-# samples = rows
-# predictors = features
-# best performing model had 94.78% accuracy
-# that's pretty good for a simple model with no tuning or feature engineering
-rpart.cv.1
-
-
